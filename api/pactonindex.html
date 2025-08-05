@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PACTON GAME</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <script>
+      window.addEventListener('error', (event) => {
+        console.error("Error caught: ", event.error);
+      }, true);
+    </script>
+
+    
+    <canvas id="unity-canvas" style="display: none; width: 100vw; height: 100vh;"></canvas>
+
+   
+    <script src="Build/PACTON_GAME.loader.js"></script>
+
+    <div class="progress-container">
+      <div class="progress-wrapper">
+        <progress id="progressBar" value="0" max="100"></progress>
+        <span id="progressText">0%</span>
+      </div>
+      <div id="downloadText">Downloading... 0MB / 62MB</div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const progressBar = document.getElementById("progressBar");
+        const progressText = document.getElementById("progressText");
+        const downloadText = document.getElementById("downloadText");
+        const unityCanvas = document.getElementById("unity-canvas");
+        const progressContainer = document.querySelector(".progress-container");
+    
+        if (!progressContainer || !progressBar || !progressText || !downloadText) {
+          console.error("Error: Some required elements are missing in the DOM.");
+          return;
+        }
+    
+        // Ensure the progress bar is visible
+        progressContainer.style.display = "block";
+        unityCanvas.style.display = "none";
+    
+        // Manually set the total file size (e.g., 62MB)
+        const totalSizeInMB = 62;
+        const totalSizeInBytes = totalSizeInMB * 1024 * 1024;
+    
+        let lastReportedProgress = 0;
+    
+        function onProgress(loaded, total) {
+          // Handle potential fraction values from Unity's progress callback
+          if (total <= 1) {
+            loaded = loaded * totalSizeInBytes; // Convert fraction to bytes
+            total = totalSizeInBytes;
+          }
+    
+          if (!isFinite(loaded) || !isFinite(total) || total <= 0) {
+            console.warn("Invalid progress values:", { loaded, total });
+            return;
+          }
+    
+          let progress = (loaded / total) * 100;
+          progress = Math.min(progress, 100); // Ensure it doesn't exceed 100%
+          lastReportedProgress = progress;
+    
+          // Update progress bar and text
+          progressBar.value = progress;
+          progressText.innerText = `${progress.toFixed(0)}%`;
+          downloadText.innerText = `Downloading... ${(loaded / 1024 / 1024).toFixed(2)}MB / ${totalSizeInMB}MB`;
+        }
+    
+        function loadUnityGame() {
+          console.log("Starting Unity Load...");
+    
+          if (typeof createUnityInstance !== "function") {
+            console.error("createUnityInstance is not defined! The loader might be missing or not loaded yet.");
+            return;
+          }
+    
+          createUnityInstance(unityCanvas, {
+            dataUrl: "Build/PACTON_GAME.data.br",
+            frameworkUrl: "Build/PACTON_GAME.framework.js.br",
+            codeUrl: "Build/PACTON_GAME.wasm.br",
+            streamingAssetsUrl: "StreamingAssets",
+            companyName: "PACTON",
+            productName: "PACTON GAME",
+            productVersion: "1.0",
+          }, (progress) => {
+            if (typeof progress === "number") {
+              onProgress(progress, 1); // Unity might provide a fraction (0 to 1)
+            } else if (progress && typeof progress.loaded === "number" && typeof progress.total === "number") {
+              onProgress(progress.loaded, progress.total);
+            } else {
+              console.warn("Received invalid progress update:", progress);
+            }
+          }).then((unityInstance) => {
+            console.log("Unity Loaded! Ensuring progress bar reaches 100%...");
+    
+            // Ensure the progress bar reaches 100% before hiding
+            if (lastReportedProgress < 100) {
+              progressBar.value = 100;
+              progressText.innerText = "100%";
+              downloadText.innerText = `Downloading... ${totalSizeInMB}MB / ${totalSizeInMB}MB`;
+            }
+    
+            // Hide the progress UI and show Unity canvas
+            setTimeout(() => {
+              progressContainer.style.display = "none";
+              unityCanvas.style.display = "block";
+              
+              console.log("Sending message to load MainMenu scene...");
+              unityInstance.SendMessage("SessionManager", "LoadScene", "MainMenu");
+            }, 500);
+          }).catch((err) => {
+            console.error("Failed to load Unity:", err);
+          });
+        }
+    
+        // Start loading Unity
+        loadUnityGame();
+      });
+    </script>
+    
+  </body>
+</html>

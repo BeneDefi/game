@@ -1,0 +1,30 @@
+{
+  "name": "pactonserver",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "VictorJRamirez",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.1",
+    "axios": "^1.7.9",
+    "body-parser": "^1.20.3",
+    "compression": "^1.8.0",
+    "cookie-parser": "^1.4.7",
+    "cookie-session": "^2.1.0",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "form-data": "^4.0.3",
+    "oauth": "^0.10.2",
+    "passport-twitter": "^0.1.5",
+    "path": "^0.12.7",
+    "querystring": "^0.2.1",
+    "serverless-http": "^3.2.0",
+    "twit": "^2.2.11"
+  }
+}
