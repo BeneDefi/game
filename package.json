@@ -9,6 +9,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@farcaster/hub-nodejs": "^0.15.5",
     "@supabase/supabase-js": "^2.48.1",
     "axios": "^1.7.9",
     "body-parser": "^1.20.3",
@@ -25,6 +26,7 @@
     "path": "^0.12.7",
     "querystring": "^0.2.1",
     "serverless-http": "^3.2.0",
-    "twit": "^2.2.11"
+    "twit": "^2.2.11",
+    "viem": "^2.34.0"
   }
 }

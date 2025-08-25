@@ -5,29 +5,409 @@ const bodyParser = require('body-parser');
 const serverless = require('serverless-http');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
-const qs = require("querystring");
 const crypto = require('crypto');
 require('dotenv').config();
-const FormData = require('form-data');
+
+// Import Farcaster Frame and Base routes
+const frameRoutes = require('./frame');
+const baseRoutes = require('./base');
+const miniAppRoutes = require('./mini-app');
+const baseAuthRoutes = require('./base-auth');
+
 const supabaseUrl = 'https://vyfqtqvhonepjjwfqgfb.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5ZnF0cXZob25lcGpqd2ZxZ2ZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkyODM1MTksImV4cCI6MjA1NDg1OTUxOX0.CLOUrX54KDcBjCFGBfZbRpTDrv0ImMrFMca-22AwwZc';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-
-
-
-
-
-const BOT_TOKEN = "7600243365:AAGRYUmzJvxbkkNmYmW_ppmNvhvWLil3BzU";
-const TELEGRAM_CHAT_ID = "-1002491731538";
 const app = express();
-app.use(express.json());
+
+// Middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors({
-    origin: 'https://pacton-11.vercel.app',
-    methods: ['GET', 'POST', 'OPTIONS'],  // Add OPTIONS
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept'],
+    origin: ['https://pacton-11.vercel.app', 'https://warpcast.com', 'https://base.org'],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'X-Frame-Signature', 'Authorization'],
     credentials: true
 }));
+
+// Mount Farcaster Frame, Base, and Mini App routes
+app.use('/api', frameRoutes);
+
+
+// User management endpoints for Farcaster users
+app.post('/api/users', async (req, res) => {
+    const { id, userName, firstName, profilePhoto, authProvider = 'farcaster' } = req.body;
+    
+    if (!id) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    try {
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', id)
+            .single();
+        
+        if (existingUser) {
+            // Update existing user
+            const { data: updatedUser, error } = await supabase
+                .from('users')
+                .update({
+                    userName,
+                    firstName,
+                    profilePhoto,
+                    lastActive: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select()
+                .single();
+            
+            if (error) throw error;
+            return res.json({ success: true, user: updatedUser });
+        }
+        
+        // Create new user
+        const { data: newUser, error } = await supabase
+            .from('users')
+            .insert({
+                id,
+                userName,
+                firstName,
+                profilePhoto,
+                authProvider,
+                referralLink: `https://warpcast.com/~/compose?text=Play Pacton Game and earn PCTN tokens! &embeds[]=${process.env.REPL_URL || 'https://your-repl-url.replit.dev'}/api/frame`,
+                lastActive: new Date().toISOString()
+            })
+            .select()
+            .single();
+        
+        if (error) throw error;
+        res.json({ success: true, user: newUser });
+        
+    } catch (error) {
+        console.error('User creation error:', error);
+        res.status(500).json({ error: 'Failed to create/update user' });
+    }
+});
+
+// Game statistics and rewards
+app.post('/api/game/update-stats', async (req, res) => {
+    const { userId, pelletsEaten, powerPelletsEaten, ghostsEaten, score } = req.body;
+    
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    try {
+        const { data: userData, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
+        
+        if (fetchError || !userData) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        // Calculate PCTN rewards based on gameplay
+        const baseReward = 10; // Base reward per game
+        const pelletReward = pelletsEaten * 2;
+        const powerPelletReward = powerPelletsEaten * 25;
+        const ghostReward = ghostsEaten * 50;
+        const scoreBonus = Math.floor(score / 1000) * 5;
+        
+        const totalReward = baseReward + pelletReward + powerPelletReward + ghostReward + scoreBonus;
+        
+        const { data: updatedUser, error: updateError } = await supabase
+            .from('users')
+            .update({
+                pelletsEaten: (userData.pelletsEaten || 0) + pelletsEaten,
+                powerPelletsEaten: (userData.powerPelletsEaten || 0) + powerPelletsEaten,
+                ghostsEaten: (userData.ghostsEaten || 0) + ghostsEaten,
+                balance: (userData.balance || 0) + totalReward,
+                gamesPlayed: (userData.gamesPlayed || 0) + 1,
+                lastGameScore: score,
+                lastActive: new Date().toISOString()
+            })
+            .eq('id', userId)
+            .select()
+            .single();
+        
+        if (updateError) throw updateError;
+        
+        res.json({
+            success: true,
+            user: updatedUser,
+            reward: totalReward,
+            breakdown: {
+                baseReward,
+                pelletReward,
+                powerPelletReward,
+                ghostReward,
+                scoreBonus
+            }
+        });
+        
+    } catch (error) {
+        console.error('Stats update error:', error);
+        res.status(500).json({ error: 'Failed to update game stats' });
+    }
+});
+
+// Daily rewards system
+app.post('/api/game/daily-reward', async (req, res) => {
+    const { userId } = req.body;
+    
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    try {
+        const { data: userData, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
+        
+        if (error || !userData) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        const now = new Date();
+        const lastClaim = userData.lastDailyReward ? new Date(userData.lastDailyReward) : null;
+        
+        // Check if 24 hours have passed
+        if (lastClaim && (now - lastClaim) < 24 * 60 * 60 * 1000) {
+            const timeLeft = 24 * 60 * 60 * 1000 - (now - lastClaim);
+            const hoursLeft = Math.ceil(timeLeft / (60 * 60 * 1000));
+            
+            return res.json({
+                success: false,
+                message: `Daily reward already claimed. Next reward in ${hoursLeft} hours.`,
+                canClaim: false,
+                timeLeft: timeLeft
+            });
+        }
+        
+        // Calculate streak bonus
+        let streak = userData.dailyStreak || 0;
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        if (lastClaim && lastClaim.toDateString() === yesterday.toDateString()) {
+            streak += 1;
+        } else if (!lastClaim || lastClaim.toDateString() !== now.toDateString()) {
+            streak = 1;
+        }
+        
+        // Calculate reward based on streak
+        const baseReward = 1000;
+        const streakBonus = Math.min(streak * 500, 10000); // Max 10k bonus
+        const totalReward = baseReward + streakBonus;
+        
+        const { data: updatedUser, error: updateError } = await supabase
+            .from('users')
+            .update({
+                balance: (userData.balance || 0) + totalReward,
+                dailyStreak: streak,
+                lastDailyReward: now.toISOString()
+            })
+            .eq('id', userId)
+            .select()
+            .single();
+        
+        if (updateError) throw updateError;
+        
+        res.json({
+            success: true,
+            reward: totalReward,
+            streak,
+            user: updatedUser,
+            canClaim: true
+        });
+        
+    } catch (error) {
+        console.error('Daily reward error:', error);
+        res.status(500).json({ error: 'Failed to claim daily reward' });
+    }
+});
+
+// Leaderboard endpoint
+app.get('/api/leaderboard', async (req, res) => {
+    try {
+        const { data: topUsers, error } = await supabase
+            .from('users')
+            .select('id, userName, firstName, balance, profilePhoto, pelletsEaten, ghostsEaten, gamesPlayed')
+            .order('balance', { ascending: false })
+            .limit(20);
+        
+        if (error) throw error;
+        
+        res.json({
+            success: true,
+            leaderboard: topUsers.map((user, index) => ({
+                rank: index + 1,
+                id: user.id,
+                name: user.userName || user.firstName || 'Anonymous',
+                balance: user.balance || 0,
+                profilePhoto: user.profilePhoto,
+                stats: {
+                    pelletsEaten: user.pelletsEaten || 0,
+                    ghostsEaten: user.ghostsEaten || 0,
+                    gamesPlayed: user.gamesPlayed || 0
+                }
+            }))
+        });
+        
+    } catch (error) {
+        console.error('Leaderboard error:', error);
+        res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+});
+
+// User profile endpoint
+app.get('/api/user/:userId', async (req, res) => {
+    const { userId } = req.params;
+    
+    try {
+        const { data: userData, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
+        
+        if (error || !userData) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        // Get user's rank
+        const { data: rankData, error: rankError } = await supabase
+            .from('users')
+            .select('id')
+            .gt('balance', userData.balance || 0)
+            .order('balance', { ascending: false });
+        
+        const rank = rankData ? rankData.length + 1 : 1;
+        
+        res.json({
+            success: true,
+            user: {
+                ...userData,
+                rank
+            }
+        });
+        
+    } catch (error) {
+        console.error('User profile error:', error);
+        res.status(500).json({ error: 'Failed to fetch user profile' });
+    }
+});
+
+// Referral system
+app.post('/api/referral/claim', async (req, res) => {
+    const { userId, referredUserId } = req.body;
+    
+    if (!userId || !referredUserId) {
+        return res.status(400).json({ error: 'Both user IDs are required' });
+    }
+    
+    try {
+        // Check if referral already exists
+        const { data: existingReferral } = await supabase
+            .from('users')
+            .select('referrals')
+            .eq('id', userId)
+            .single();
+        
+        const referrals = existingReferral?.referrals || [];
+        
+        if (referrals.includes(referredUserId)) {
+            return res.json({
+                success: false,
+                message: 'Referral already claimed'
+            });
+        }
+        
+        // Add referral and reward
+        const referralReward = 25000; // 25k PCTN for successful referral
+        
+        const { data: updatedUser, error } = await supabase
+            .from('users')
+            .update({
+                referrals: [...referrals, referredUserId],
+                balance: (existingReferral.balance || 0) + referralReward
+            })
+            .eq('id', userId)
+            .select()
+            .single();
+        
+        if (error) throw error;
+        
+        res.json({
+            success: true,
+            reward: referralReward,
+            user: updatedUser,
+            message: 'Referral bonus claimed!'
+        });
+        
+    } catch (error) {
+        console.error('Referral claim error:', error);
+        res.status(500).json({ error: 'Failed to claim referral' });
+    }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        services: {
+            supabase: 'connected',
+            base: 'connected',
+            farcaster: 'connected'
+        }
+    });
+});
+
+// Serve manifest for Farcaster mini app
+app.get('/api/manifest.json', (req, res) => {
+    res.sendFile(path.join(__dirname, 'manifest.json'));
+});
+
+// Main game page
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pactonindex.html'));
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ 
+        error: 'Internal server error',
+        message: err.message 
+    });
+});
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Pacton Game API running on port ${PORT}`);
+    console.log('Base mini app and Farcaster frame integration active');
+});
+
+module.exports = app;
+
+app.use('/api', baseRoutes);
+app.use('/api', miniAppRoutes);
+app.use('/api', baseAuthRoutes);
+const miniAppRoutes = require('./mini-app');
+app.use('/api', miniAppRoutes);
+
+// Mount Base authentication routes
+const baseAuthRoutes = require('./base-auth');
+app.use('/api', baseAuthRoutes);
 
 
 

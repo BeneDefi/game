@@ -1,0 +1,25 @@
+
+{
+  "name": "Pacton Game",
+  "short_name": "Pacton",
+  "description": "Play Pacton Game and earn PCTN tokens on Base blockchain",
+  "start_url": "/api/frame",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#FFD700",
+  "icons": [
+    {
+      "src": "https://pacton-11.vercel.app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://pacton-11.vercel.app/icon-512.png", 
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["games", "entertainment"],
+  "lang": "en",
+  "orientation": "portrait"
+}
